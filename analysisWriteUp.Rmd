@@ -1,0 +1,106 @@
+---
+title: "Qualitative Assessment of Unilateral Bicep Dumbbell Curls from Wearables"
+author: "Suzanne Farrell"
+date: "4/23/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(caret)
+library(randomForest)
+library(e1071)
+```
+
+## Introduction
+
+Many wearables are great at predicting the type of activity that the person is performing. In this analysis, I will tackle the problem of predicting how well a person performs an activity, specifically unilateral bicep dumbbell curls. Data has been obtained from  <http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har#dataset>. Six male participants were asked to perform dumbbell curls in five different manners: exactly according to specification, throwing their elbows forwards, lifting the dumbbell half way, lowering the dumbbell half way, and throwing their hips forward. The data has been recorded from sensors placed in four different areas: glove, arm, dumbbell, and lumbar belt, and records the acceleration, gyroscope, and magnetometer in the x-, y-, and z-planes. 
+
+
+## Tidying the Data
+The dataset includes summary statistics for each of the recorded sensors over 0.5-2.5 second increments. While this information is interesting, I have chosen to work with strictly the raw sensor output data. I have trimmed the dataset down to only include variables that reflect that raw output, and their known classe indicator. 
+
+```{r tidy, include = FALSE }
+training = read.csv("pml-training.csv", header = TRUE)
+
+# Extract Only pertinent columns
+headerNames = names(training)
+pattern = "^accel|gyro|mag|class"
+
+tmp = grep(pattern, headerNames)
+trainData = training[,tmp]
+```
+
+
+## Training & Testing Datasets
+I have split the data into training and testing datasets where 75% of the original dataset was randomly sampled and designated as "training", while the remaining 25% became the test set. There is also a final validation dataset. 
+
+```{r partitions, include= FALSE}
+set.seed(309)
+inTrain = createDataPartition(trainData$classe, p = 0.75, list = FALSE)
+trainSet= trainData[inTrain,]
+testSet = trainData[-inTrain,]
+```
+
+## Modeling
+I have chosen to look a a few different forms of classification models to ensure that the selection of a final prediction model is the best performing. Below will outline three different methods: random forest, GBM, and SVM. 
+
+### Random Forest
+A random forest model is a great way to perform classification on a large number of variables. For this model, no cross validation is required as the unbiased estimate of the test set error is computed internally through constructing trees from different boostrapping samples. 
+
+```{r RF, include = FALSE}
+set.seed(390)
+modFitRF = randomForest(classe ~ . , data = trainSet, importance = TRUE)
+predFitRF = predict(modFitRF, newdata = testSet[,-37])
+```
+
+This model in itself yields an accuracy of 98.7%. Looking at the resulting confusion matrix below, you can see how well the classes are predicted. Looking off the diagonals, you will see that there are not many cases where the prediction does not align with the reference class.
+
+```{r confusionMat, include = TRUE, echo = FALSE}
+cm = confusionMatrix(predFitRF, testSet$classe)
+cm$table
+```
+
+Furthermore, the sensitivity and specificity of the prediction, that is, the true positive and true negative rate, are both quite high. This signals that for each class, the chance of a correct classification to the reference class is quite likely, with a mean across all classes of 98.5%. Additionally, the specificity component indicates the probability of a class not being incorrectly classified as its reference class, which, averaged across all classes, is 99.7%.
+```{r confusionMat stats, include = TRUE, echo = FALSE}
+cm$byClass[,1:2]
+```
+
+
+Lastly, from the random forest model, we are able to determine the importance of each of the variables thrown into the model. The top variable predictors (>50% Accuracy) appear to be from the dumbbell sensor, and focus more on the magnetometer and accelerometer readings. 
+
+```{r variableImport, include = TRUE, echo = FALSE}
+varImpPlot(modFitRF, type = 1, main = "Variable Importance")
+```
+
+### Gradient Boosting
+```{r GBM, include = FALSE}
+set.seed(309)
+modFitGBM = train(classe ~ ., data = trainSet, 
+                    method = "gbm", 
+                    trControl = trainControl(method = "cv", number = 10))
+predFitGBM = predict(modFitGBM, newdata = testSet[,-37])
+cm = confusionMatrix(predFitGBM, testSet$classe)
+```
+The GBM was chosen to compare because of its ability to deal with a large dataset and have a high predictive power. I used k-fold cross validation with this method, folding the data 10x. The overall accuracy of this method is 90%, and many of the classes have lower sensitivity than the Random Forest method. Looking at the confusion matrix below, you can see that there are many more false predictions (as seen in the off-diagonals).
+```{r gbm cv, include = TRUE, echo = FALSE}
+cm$table
+```
+
+### Support Vector Machine
+```{r SVM, include = FALSE}
+modFitSVM = svm(classe ~ ., data = trainSet, 
+                    method = "svm")
+predFitSVM = predict(modFitSVM, newdata = testSet[,-37])
+cm = confusionMatrix(predFitSVM, testSet$classe)
+```
+The SVM method is a classification method that seeks to split the data into different classification groups. Using a support vector machine method yielded a classification accuracy of 93% - slightly higher than GBM, but not as high as the Random Forest. The confusion matrix is shown below. 
+
+```{r SVM cm, include = TRUE, echo = FALSE}
+cm$table
+```
+
+
+
+## Conclusion
+In summary, I have fit three different classification machine learning methods to the wearable data in order to accurately predict how well a wearer performs unilateral bicep dumbbell curls. Of the three, the random forest model yielded the highest accuracy prediction, and an out of bag error rate of 1.16%. This is a great prediction model to use as it has such a low error rate, and high accuracy. Addionally, the sensitivity and specificity of the classifiers are high. 
